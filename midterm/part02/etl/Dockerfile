@@ -12,6 +12,7 @@ COPY entrypoint.sh .
 
 RUN chmod 0644 /etc/cron.d/etl-cron && \
     crontab /etc/cron.d/etl-cron && \
-    chmod +x entrypoint.sh
+    chmod +x entrypoint.sh && \
+    sed -i 's/\r$//' entrypoint.sh
 
-CMD ["./entrypoint.sh"]
+CMD ["/app/entrypoint.sh"]
