@@ -23,9 +23,43 @@ import os
 import sys
 from datetime import date, timedelta
 
+from cassandra.cluster import Cluster
 import psycopg2
 from psycopg2.extras import execute_values
 
+# ---------------------------------------------------------------------------
+# Cassandra extraction function
+# ---------------------------------------------------------------------------
+
+def extract_orders_from_cassandra():
+    """Extract orders from Cassandra's orders_by_customer table."""
+    hosts = os.environ["CASSANDRA_HOSTS"].split(",")
+    keyspace = os.environ["CASSANDRA_KEYSPACE"]
+    cluster = Cluster(hosts)
+    session = cluster.connect(keyspace)
+
+    # Query all orders — need to get all customer_ids first
+    # For simplicity, query with a full table scan (small dataset)
+    rows = session.execute("SELECT order_id, customer_id, product_id, quantity, total_price, order_date FROM orders_by_customer")
+
+    # Deduplicate by order_id (in case of overlapping partitions)
+    seen = set()
+    orders = []
+    for row in rows:
+        if row.order_id not in seen:
+            seen.add(row.order_id)
+            orders.append((
+                row.order_id,
+                row.customer_id,
+                row.product_id,
+                row.quantity,
+                float(row.total_price),
+                row.order_date.date()
+            ))
+
+    print(f"  Extracted {len(orders)} orders from Cassandra")
+    cluster.shutdown()
+    return orders
 
 # ---------------------------------------------------------------------------
 # Database connection helpers
@@ -239,18 +273,18 @@ def run_etl():
 
     # Extract from SE shard
     se_conn = get_connection("SALES_SHARD_SE")
-    se_customers, se_products, se_orders = extract_sales_from_shard(se_conn, "sales-shard-se")
+    se_customers, se_products, _ = extract_sales_from_shard(se_conn, "sales-shard-se")
     se_conn.close()
 
     # Extract from NE shard
     ne_conn = get_connection("SALES_SHARD_NE")
-    ne_customers, ne_products, ne_orders = extract_sales_from_shard(ne_conn, "sales-shard-ne")
+    ne_customers, ne_products, _ = extract_sales_from_shard(ne_conn, "sales-shard-ne")
     ne_conn.close()
 
     # Merge shard results
     customers = se_customers + ne_customers
     products = se_products  # Products are identical on both shards (reference table)
-    orders = se_orders + ne_orders
+    orders = extract_orders_from_cassandra()
     print(f"  Merged: {len(customers)} customers, {len(products)} products, {len(orders)} orders")
 
     hr_conn = get_connection("HR")
