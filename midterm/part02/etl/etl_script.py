@@ -232,10 +232,32 @@ def run_etl():
     print("=" * 60)
 
     # --- EXTRACT ---
+    
     print("\n[EXTRACT] Reading from operational databases...")
+    '''
     sales_conn = get_connection("SALES")
     customers, products, orders = extract_sales(sales_conn)
     sales_conn.close()
+    '''
+    # Connect to both shards
+    sales_conn_se = get_connection("SALES_SHARD_SE")
+    sales_conn_ne = get_connection("SALES_SHARD_NE")
+
+    # Extract from both shards
+    customers_se, products_se, orders_se = extract_sales(sales_conn_se)
+    customers_ne, products_ne, orders_ne = extract_sales(sales_conn_ne)
+
+    # Merge data
+    customers = customers_se + customers_ne
+    products = products_se   # same reference data, use one shard only
+    orders = orders_se + orders_ne
+
+    # Close connections
+    sales_conn_se.close()
+    sales_conn_ne.close()
+
+    
+
 
     hr_conn = get_connection("HR")
     employees = extract_hr(hr_conn)
